@@ -14,7 +14,7 @@ set -e
 mkdir -p logs
 
 echo "============================================"
-echo "Creating pRisk-Pressure environment with UV at $(date)"
+echo "Creating environment with UV at $(date)"
 echo "============================================"
 
 # Load modules BEFORE creating/activating venv

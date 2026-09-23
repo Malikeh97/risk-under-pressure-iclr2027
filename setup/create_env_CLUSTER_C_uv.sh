@@ -9,7 +9,7 @@
 set -e
 
 echo "============================================"
-echo "Creating pRisk-Pressure environment with UV at $(date)"
+echo "Creating environment with UV at $(date)"
 echo "============================================"
 
 module load StdEnv/2023
