@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128GB
 #SBATCH --partition=gpubase_bygpu_b3
-#SBATCH --account=def-craffel_gpu
+#SBATCH --account=YOUR_SLURM_ACCOUNT
 
 hostname
 

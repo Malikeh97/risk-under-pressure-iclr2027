@@ -1,7 +1,7 @@
 #!/bin/bash
 # Submit JailbreakBench per-model pressure sensitivity experiments.
 # Usage: bash run_JB_experiments.sh
-# Requires: must be run from the project root on a klogin* node.
+# Requires: must be run from the project root on a LOGIN_NODE* node.
 #
 # All runs use configs/experiments/base.yaml; model, attack and seeds are CLI overrides.
 #

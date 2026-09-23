@@ -10,8 +10,8 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 authors = [
-  {name = "Malikeh Ehghaghi", email = "malikehehghaghi@gmail.com"},
-  {name = "Boglarka Ecsedi", email = "ecsedi.bogi@gmail.com"}
+  {name = "Anonymous Author", email = "anon.author@example.com"},
+  {name = "Anonymous Author", email = "anon.coauthor@example.com"}
 ]
 keywords = ["llm", "adversarial robustness", "jailbreak", "safety", "red-teaming"]
 classifiers = [
@@ -56,7 +56,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Malikeh97/risk-under-pressure"
+Repository = "ANONYMIZED-REPO-URL"
 Paper = "TBD"
 
 [project.optional-dependencies]

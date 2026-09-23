@@ -1,8 +1,8 @@
 _host=$(hostname)
 _host_f=$(hostname -f 2>/dev/null || echo "$_host")
 
-# Load StdEnv on Alliance clusters (Trillium, Fir)
-if [[ "$_host" == "trig-login01" || "$_host_f" == *.fir.alliancecan.ca ]]; then
+# Load StdEnv on Alliance clusters (CLUSTER_C, CLUSTER_B)
+if [[ "$_host" == "CLUSTER_C_LOGIN" || "$_host_f" == *.CLUSTER_B ]]; then
     module load StdEnv/2023
 fi
 module load cuda/12.6
@@ -11,10 +11,10 @@ module load gcc arrow/19.0.1 python/3.11
 source .venv/bin/activate
 
 # Set SCRATCH per cluster
-if [[ "$_host" == klogin* ]]; then
-    export SCRATCH=/home/ehghaghi/scratch/ehghaghi
+if [[ "$_host" == LOGIN_NODE* ]]; then
+    export SCRATCH=/home/$USER/scratch/$USER
 else
-    # Alliance clusters (Fir, Trillium): use standard scratch path
+    # Alliance clusters (CLUSTER_B, CLUSTER_C): use standard scratch path
     export SCRATCH=/scratch/$USER
 fi
 export HF_HOME=$SCRATCH/huggingface
@@ -63,29 +63,29 @@ function should_skip_job() {
     return 1
 }
 
-if [[ "$_host" == klogin* ]]; then
+if [[ "$_host" == LOGIN_NODE* ]]; then
     function submit() {
         local job_name="$1"
         local command="$2"
         should_skip_job "$job_name" && return 0
         mkdir -p logs
-        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_killarney.sbatch "$command"
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_CLUSTER_A.sbatch "$command"
     }
-elif [[ "$_host_f" == *.fir.alliancecan.ca ]]; then
+elif [[ "$_host_f" == *.CLUSTER_B ]]; then
     function submit() {
         local job_name="$1"
         local command="$2"
         should_skip_job "$job_name" && return 0
         mkdir -p logs
-        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_fir.sbatch "$command"
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_CLUSTER_B.sbatch "$command"
     }
-elif [[ "$_host" == "trig-login01" ]]; then
+elif [[ "$_host" == "CLUSTER_C_LOGIN" ]]; then
     function submit() {
         local job_name="$1"
         local command="$2"
         should_skip_job "$job_name" && return 0
         mkdir -p logs
-        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_trillium.sbatch "$command"
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_CLUSTER_C.sbatch "$command"
     }
 else
     echo "Unknown hostname: $_host - cannot define submit function"

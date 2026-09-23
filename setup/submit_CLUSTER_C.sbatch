@@ -4,11 +4,11 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128GB
 #SBATCH --partition=compute
-#SBATCH --account=def-craffel
+#SBATCH --account=YOUR_SLURM_ACCOUNT
 
 hostname
 
-# Trillium compute nodes have no internet access — use cached models
+# CLUSTER_C compute nodes have no internet access — use cached models
 export OFFLINE_MODE=1
 
 source setup/start_env.sh

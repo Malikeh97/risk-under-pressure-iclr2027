@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --time=01:00:00
-#SBATCH --gres=gpu:h100:1
+#SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
-#SBATCH --partition=gpubase_bygpu_b1
-#SBATCH --account=def-craffel_gpu
+#SBATCH --partition=debug
+#SBATCH --account=YOUR_SLURM_ACCOUNT
 
 set -e
 

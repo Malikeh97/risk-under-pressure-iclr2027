@@ -5,7 +5,7 @@
 # phase — per-prompt GRPO runs inside run_inference.py --attack rl.
 #
 # Usage: bash run_rl_smoke.sh
-# Requires: must be run from the project root on a klogin* (or Alliance) login node.
+# Requires: must be run from the project root on a LOGIN_NODE* (or Alliance) login node.
 #
 # The pipeline runs on a GPU node (see scripts/rl_smoke_job.sh) and writes everything under
 # $SCRATCH/rl_smoke; model + dataset caches go to $SCRATCH/huggingface (set in start_env.sh).

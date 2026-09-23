@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit attack transfer experiments to Killarney L40S GPU.
+# Submit attack transfer experiments to CLUSTER_A L40S GPU.
 #
 # Replays pre-computed GCG trajectories from a source model against target models.
 # Source traces are read from $SCRATCH/rup (output of run_HB_experiments.sh / run_JB_experiments.sh).
@@ -8,7 +8,7 @@
 #
 # Each seed is submitted as a separate job for fine-grained control.
 # Usage: bash run_transfer_experiments.sh
-# Requires: must be run from the project root on a klogin* node.
+# Requires: must be run from the project root on a LOGIN_NODE* node.
 
 set -e
 

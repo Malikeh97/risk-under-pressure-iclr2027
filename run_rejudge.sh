@@ -53,9 +53,9 @@ BENCHES="${BENCHES:-jailbreakbench harmbench}"
 
 # Source of truth: the incumbent tree, whose trajectories were not truncated by a broken judge.
 #
-# CAUTION on $SCRATCH. setup/start_env.sh picks it from the hostname — `klogin*` gets
+# CAUTION on $SCRATCH. setup/start_env.sh picks it from the hostname — `LOGIN_NODE*` gets
 # /home/$USER/scratch/$USER, everything else gets /scratch/$USER. Compute nodes here are `kn*`,
-# not `klogin*`, so inside a batch job $SCRATCH resolves to /scratch/$USER, where no rup tree
+# not `LOGIN_NODE*`, so inside a batch job $SCRATCH resolves to /scratch/$USER, where no rup tree
 # exists. The other scripts survive that only because they expand $SCRATCH on the LOGIN node at
 # submit time. Run this script on the login node, or pass SRC_ROOT explicitly. The existence check
 # below turns a silent "0 cells found" into a loud failure either way.

@@ -27,7 +27,7 @@
 #   bash run_judge_smoke.sh diagnose     # control-set gate only (no smoke run needed)
 #   JUDGES="gemma3_4b_it_judge" bash run_judge_smoke.sh
 #
-# Requires: must be run from the project root on a klogin*/Alliance login node.
+# Requires: must be run from the project root on a LOGIN_NODE*/Alliance login node.
 
 set -e
 

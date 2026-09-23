@@ -27,7 +27,7 @@
 # submitted just like any other attack (e.g. gcg), one job per (model, seed).
 #
 # Usage: bash run_rl_JB_experiments.sh
-# Requires: must be run from the project root on a klogin* node.
+# Requires: must be run from the project root on a LOGIN_NODE* node.
 #
 # COMPUTE WARNING: this submits 170 JOBS (17 models x 10 seeds), and per-prompt GRPO is by far
 # the most expensive attack here. Per behavior: up to 81 target queries, 3 judge passes per query

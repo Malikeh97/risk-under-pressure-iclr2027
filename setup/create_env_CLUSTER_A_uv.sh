@@ -1,23 +1,27 @@
 #!/bin/bash
 #SBATCH --time=01:00:00
-#SBATCH --gpus-per-task=1
+#SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
-#SBATCH --partition=debug
-#SBATCH --account=def-craffel
+#SBATCH --partition=gpubase_l40s_b3
+#SBATCH --account=YOUR_SLURM_ACCOUNT
+#SBATCH --job-name=create_env_CLUSTER_A
+#SBATCH --output=logs/%j_create_env_CLUSTER_A.out
+#SBATCH --error=logs/%j_create_env_CLUSTER_A.out
 
 set -e
+
+mkdir -p logs
 
 echo "============================================"
 echo "Creating pRisk-Pressure environment with UV at $(date)"
 echo "============================================"
 
-module load StdEnv/2023
+# Load modules BEFORE creating/activating venv
 module load cuda/12.6
 module load gcc arrow/19.0.1 python/3.11
 
-mkdir -p logs
-
+# Install UV if not available
 if ! command -v uv &> /dev/null; then
     echo "Installing UV..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -26,6 +30,7 @@ fi
 
 echo "UV version: $(uv --version)"
 
+# Install project with dependencies using uv sync
 echo "Installing risk-under-pressure with dependencies..."
 uv sync
 

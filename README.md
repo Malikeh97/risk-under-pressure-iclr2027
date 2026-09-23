@@ -7,7 +7,7 @@
 
 **Compute-Aware Evaluation of Adversarial Robustness in Language Models**
 
-[![Paper](https://img.shields.io/badge/paper-preprint-blue)](https://arxiv.org/pdf/2606.11409)
+[![Paper](https://img.shields.io/badge/paper-preprint-blue)](https://arxiv.org/pdf/XXXX.XXXXX)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Most jailbreak benchmarks report attack success rate (ASR) at a fixed query budget, which
@@ -28,7 +28,7 @@ two metrics: compute to reach a target risk level (`C@τ`) and risk gained per F
 ## Environment Setup
 
 ```bash
-git clone https://github.com/r-three/risk-under-pressure.git && cd risk-under-pressure
+git clone ANONYMIZED-REPO-URL.git && cd risk-under-pressure
 uv venv && source .venv/bin/activate
 uv pip install -e .
 
@@ -41,13 +41,13 @@ Python 3.11, CUDA 12.6, one GPU. `HF_TOKEN` is the only required key.
 it for you:
 
 ```bash
-mkdir -p logs && sbatch setup/create_env_killarney_uv.sh   # or _fir_ / _trillium_
+mkdir -p logs && sbatch setup/create_env_CLUSTER_A_uv.sh   # or _CLUSTER_B_ / _CLUSTER_C_
 ```
 
 `setup/start_env.sh` loads the modules, activates `.venv`, sets `SCRATCH`, and defines the
 `submit` helper that every `run_*.sh` uses (it skips jobs already running or finished in the last
 2 days). `setup/judge_env.sh` then derives `RUN_ROOT` / `PLOT_ROOT` from the selected `JUDGE`.
-Cluster profiles live in `setup/submit_{killarney,fir,trillium}.sbatch` — one GPU, 8 CPUs,
+Cluster profiles live in `setup/submit_{CLUSTER_A,CLUSTER_B,CLUSTER_C}.sbatch` — one GPU, 8 CPUs,
 128 GB, 23 h. **Edit the `--account` line to your own allocation.**
 
 ---
@@ -271,15 +271,15 @@ formula.
 ## Citation
 
 ```bibtex
-@article{ehghaghi2026riskpressure,
+@article{anon2026riskpressure,
   title         = {Risk Under Pressure: Compute-Aware Evaluation of Adversarial Robustness in Language Models},
-  author        = {Ehghaghi, Malikeh and Ecsedi, Boglarka and Chechik, Marsha and Raffel, Colin},
-  journal       = {arXiv preprint arXiv:2606.11409},
+  author        = {Anon, Anon and Anon, Anon and Anon, Anon and Anon, Anon},
+  journal       = {arXiv preprint arXiv:XXXX.XXXXX},
   year          = {2026},
-  eprint        = {2606.11409},
+  eprint        = {XXXX.XXXXX},
   archivePrefix = {arXiv},
   primaryClass  = {cs.LG},
-  url           = {https://arxiv.org/abs/2606.11409},
+  url           = {https://arxiv.org/abs/XXXX.XXXXX},
 }
 ```
 

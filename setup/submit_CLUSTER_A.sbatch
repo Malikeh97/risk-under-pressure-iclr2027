@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128GB
 #SBATCH --partition=gpubase_l40s_b3
-#SBATCH --account=aip-craffel
+#SBATCH --account=YOUR_SLURM_ACCOUNT
 
 # Show node name
 hostname
