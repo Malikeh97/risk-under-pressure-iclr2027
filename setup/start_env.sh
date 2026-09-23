@@ -1,0 +1,92 @@
+_host=$(hostname)
+_host_f=$(hostname -f 2>/dev/null || echo "$_host")
+
+# Load StdEnv on Alliance clusters (Trillium, Fir)
+if [[ "$_host" == "trig-login01" || "$_host_f" == *.fir.alliancecan.ca ]]; then
+    module load StdEnv/2023
+fi
+module load cuda/12.6
+module load gcc arrow/19.0.1 python/3.11
+
+source .venv/bin/activate
+
+# Set SCRATCH per cluster
+if [[ "$_host" == klogin* ]]; then
+    export SCRATCH=/home/ehghaghi/scratch/ehghaghi
+else
+    # Alliance clusters (Fir, Trillium): use standard scratch path
+    export SCRATCH=/scratch/$USER
+fi
+export HF_HOME=$SCRATCH/huggingface
+export HF_DATASETS_CACHE=$SCRATCH/huggingface/datasets
+export TRANSFORMERS_CACHE=$SCRATCH/huggingface
+export TORCH_HOME=$SCRATCH/torch
+
+# Load API keys from .env if present
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
+# HuggingFace token: .env takes priority, fall back to ~/hf_token.txt
+if [ -f ~/hf_token.txt ]; then
+    python -c "from huggingface_hub import login; login(token='$(cat ~/hf_token.txt)')"
+fi
+
+# If OFFLINE_MODE is set to 1, disable network access
+if [[ $OFFLINE_MODE == 1 ]]; then
+    echo "Running in offline mode"
+    export HF_DATASETS_OFFLINE=1
+    export HF_HUB_OFFLINE=1
+    export WANDB_MODE=offline
+fi
+
+
+# Check if job should be skipped (already running/pending or completed in past 2 days)
+function should_skip_job() {
+    local job_name="$1"
+
+    # Check if job is currently running or pending (same user)
+    if squeue --name="$job_name" --user="$USER" --noheader 2>/dev/null | grep -q .; then
+        echo "SKIP: Job '$job_name' is already running or pending."
+        return 0
+    fi
+
+    # Check if job completed successfully in the past 2 days (same user)
+    local two_days_ago=$(date -d '2 days ago' +%Y-%m-%d 2>/dev/null || date -v-2d +%Y-%m-%d)
+    if sacct --name="$job_name" --user="$USER" --starttime="$two_days_ago" --state=COMPLETED --noheader 2>/dev/null | grep -q .; then
+        echo "SKIP: Job '$job_name' completed successfully in the past 2 days."
+        return 0
+    fi
+
+    return 1
+}
+
+if [[ "$_host" == klogin* ]]; then
+    function submit() {
+        local job_name="$1"
+        local command="$2"
+        should_skip_job "$job_name" && return 0
+        mkdir -p logs
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_killarney.sbatch "$command"
+    }
+elif [[ "$_host_f" == *.fir.alliancecan.ca ]]; then
+    function submit() {
+        local job_name="$1"
+        local command="$2"
+        should_skip_job "$job_name" && return 0
+        mkdir -p logs
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_fir.sbatch "$command"
+    }
+elif [[ "$_host" == "trig-login01" ]]; then
+    function submit() {
+        local job_name="$1"
+        local command="$2"
+        should_skip_job "$job_name" && return 0
+        mkdir -p logs
+        sbatch --job-name="$job_name" --output="logs/%j_$job_name.out" --error="logs/%j_$job_name.out" setup/submit_trillium.sbatch "$command"
+    }
+else
+    echo "Unknown hostname: $_host - cannot define submit function"
+fi

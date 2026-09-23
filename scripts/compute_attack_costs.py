@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""
+compute_attack_costs.py — Augment metrics.csv with token and FLOP cost columns.
+
+Reads the same results.jsonl tree used by run_evaluation.py, computes mean
+cumulative token and FLOP costs at each pressure level, and writes
+cost_metrics.csv in the same directory as the input metrics.csv.
+
+cost_metrics.csv has all columns from metrics.csv plus:
+  mean_target_tokens   — mean target-model tokens consumed up to this lambda
+  mean_total_tokens    — mean total tokens (+ PAIR attacker) up to this lambda
+  mean_target_tflops   — mean target-model TFLOPs up to this lambda
+  mean_total_tflops    — mean total TFLOPs up to this lambda
+  mean_nojudge_*       — the same axes with the judge excluded (see below)
+
+Two cost framings, both written:
+  *_total_*    target + judge + attacker. What it costs to REPRODUCE this measurement.
+  *_nojudge_*  target + attacker only.    What the ATTACK itself costs an adversary.
+The judge is the evaluator's instrument — a real adversary reads the response themselves and
+never pays to run an LLM judge over every reply. The distinction is not cosmetic: the judge
+fires once per step on every attack, so on cheap template attacks it can dominate the total,
+and since judges differ in size (run_judge_ablation.sh), part of any cross-judge difference on
+the total axes is just the judge's own cost moving. The nojudge axes are invariant to the
+judge, which makes them the right ones for comparing runs measured under different judges.
+
+Usage:
+    python scripts/compute_attack_costs.py \\
+        --results-dir results/multitrial_experiments/pressure_sensitivity/harmbench/qwen2.5-0.5b-instruct \\
+        --metrics-csv  results/multitrial_experiments/pressure_sensitivity/harmbench/qwen2.5-0.5b-instruct/metrics.csv
+
+    # Custom output path:
+    python scripts/compute_attack_costs.py \\
+        --results-dir path/to/results \\
+        --metrics-csv path/to/metrics.csv \\
+        --output path/to/cost_metrics.csv
+
+    # Adjust GCG gradient-step multiplier (default 3.0 = forward+backward;
+    # 128 candidate passes are always included separately):
+    python scripts/compute_attack_costs.py \\
+        --results-dir path/to/results \\
+        --metrics-csv path/to/metrics.csv \\
+        --gcg-backward-mult 3.0
+
+Attacker sizing: `pair__<config>` directories (written when an experiment sets
+attacker_models — see configs/experiments/paper/attacker_size.yaml) are charged at their
+own attacker's params_b and hosted rate, resolved from that config. Plain `pair`/`rl`
+directories use --attacker-model, which defaults to the incumbent qwen2.5-7b-instruct.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from rup.metrics.cost_mapper import aggregate_costs, attacker_from_attack_id, load_model_registry
+from rup.metrics.cost_summary import (
+    compute_cost_summary_metrics,
+    compute_cost_summary_by_category,
+)
+from rup.utils.io import TrialRecord, read_jsonl
+from rup.utils.logging import get_logger
+
+logger = get_logger("compute_attack_costs")
+
+COST_COLS = [
+    "mean_target_tokens",
+    "mean_judge_tokens",
+    "mean_attacker_tokens",
+    "mean_total_tokens",
+    "mean_target_tflops",
+    "mean_judge_tflops",
+    "mean_attacker_tflops",
+    "mean_total_tflops",
+    "mean_total_seconds",     # measured attack wall-clock (NaN if any step untimed)
+    "mean_target_dollars",    # per-component hosted cost, each priced by its own model
+    "mean_judge_dollars",
+    "mean_attacker_dollars",
+    "mean_total_dollars",     # = target + judge + attacker (NaN unless --pricing-config given)
+    # Alternative accounting — the attacker's own bill, judge excluded (target + attacker).
+    # The judge is the evaluator's instrument; a real adversary does not run an LLM judge
+    # over every reply. `total` is the cost of reproducing the measurement, `nojudge` is the
+    # cost of mounting the attack. No seconds variant: that axis is measured wall-clock with
+    # the judge inside the timed region, so it cannot be split post hoc.
+    "mean_nojudge_tokens",
+    "mean_nojudge_tflops",
+    "mean_nojudge_dollars",
+]
+
+
+def discover_results(results_dir: Path) -> dict[tuple[str, str], Path]:
+    """
+    Supports two directory layouts:
+    - Legacy:  results_dir / model_id / attack_id / results.jsonl
+    - Current: results_dir / seed     / attack_id / results.jsonl
+      (produced by run_inference.py when results_dir is the per-model output dir)
+      In this case model_id is synthesised as "{results_dir.name}_seed{seed}",
+      matching the keys written by run_evaluation.py into metrics.csv.
+    """
+    found: dict[tuple[str, str], Path] = {}
+    for f in results_dir.rglob("results.jsonl"):
+        attack_id = f.parent.name
+        seed_or_model_dir = f.parent.parent
+        if seed_or_model_dir.parent == results_dir:
+            # Current format: results_dir / seed / attack_id / results.jsonl
+            model_id = f"{results_dir.name}_seed{seed_or_model_dir.name}"
+        else:
+            # Legacy format: results_dir / model_id / attack_id / results.jsonl
+            model_id = seed_or_model_dir.name
+        found[(model_id, attack_id)] = f
+    return found
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Compute token/FLOP costs from JSONL results")
+    p.add_argument("--results-dir", required=True,
+                   help="Root of the results tree (same as run_evaluation.py)")
+    p.add_argument("--metrics-csv", required=True,
+                   help="Existing metrics.csv to read lambda levels and join results into")
+    p.add_argument("--output", default=None,
+                   help="Output CSV path (default: cost_metrics.csv next to metrics.csv)")
+    p.add_argument("--gcg-backward-mult", type=float, default=3.0,
+                   help="FLOPs multiplier for the GCG gradient step only (default 3.0 = "
+                        "1 forward + 1 backward). The 128 candidate forward passes are "
+                        "always counted separately and are not affected by this flag.")
+    p.add_argument("--judge-model", default="llama3.1-8b-instruct",
+                   help="Model ID of the safety judge used during inference "
+                        "(default: llama3.1-8b-instruct). Used to compute judge token/FLOP costs.")
+    p.add_argument("--attacker-model", default="qwen2.5-7b-instruct",
+                   help="Model ID of the PAIR/RL attacker (default: qwen2.5-7b-instruct). "
+                        "Sets the attacker's params_b on the FLOP axis and its $/1M-token "
+                        "rate on the dollar axis. Only used for result directories that do "
+                        "NOT name their attacker: a `pair__<config>` directory (written when "
+                        "an experiment sets attacker_models) takes the attacker from its own "
+                        "config, so an attacker sweep needs no flag at all.")
+    p.add_argument("--rl-num-generations", type=int, default=8,
+                   help="GRPO group size for the RL attack — sessions per group (num_generations "
+                        "in configs/attacks/rl.yaml, default 8). With --rl-session-rounds, "
+                        "reconstructs which RL steps received a weight update, for LoRA-aware "
+                        "attacker FLOPs. Only a fallback: a results file that recorded its own "
+                        "value in TrialRecord.metadata is priced with that instead.")
+    p.add_argument("--rl-session-rounds", type=int, default=5,
+                   help="Rounds per RL session, scored best-of-N (session_rounds in "
+                        "configs/attacks/rl.yaml, default 5). Same fallback rule as above.")
+    p.add_argument("--pricing-config", default=None,
+                   help="Path to configs/pricing.yaml (per-model hosted $/1M-token rates). "
+                        "Required to populate the mean_total_dollars column; omit to leave it NaN.")
+    p.add_argument("--configs-dir", default="configs",
+                   help="Directory containing model configs (default: configs). "
+                        "Used to load the model registry for FLOP/token computation.")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    results_dir = Path(args.results_dir)
+    metrics_path = Path(args.metrics_csv)
+
+    if not results_dir.exists():
+        logger.error(f"Results directory not found: {results_dir}")
+        sys.exit(1)
+    if not metrics_path.exists():
+        logger.error(f"Metrics CSV not found: {metrics_path}")
+        sys.exit(1)
+
+    output_path = Path(args.output) if args.output else metrics_path.parent / "cost_metrics.csv"
+
+    # ------------------------------------------------------------------ #
+    # Load existing metrics.csv to get lambda levels and join target
+    # ------------------------------------------------------------------ #
+    with open(metrics_path, newline="") as f:
+        reader = csv.DictReader(f)
+        metrics_rows = list(reader)
+        metrics_fieldnames = reader.fieldnames or []
+
+    if not metrics_rows:
+        logger.error("metrics.csv is empty")
+        sys.exit(1)
+
+    # Build lookup: (model_id, attack_id) → {lambda: row}
+    metrics_by_key: dict[tuple[str, str], dict[int, dict]] = {}
+    for row in metrics_rows:
+        key = (row["model_id"], row["attack_id"])
+        metrics_by_key.setdefault(key, {})[int(row["lambda"])] = row
+
+    # ------------------------------------------------------------------ #
+    # Discover JSONL files and compute costs
+    # ------------------------------------------------------------------ #
+    result_files = discover_results(results_dir)
+    if not result_files:
+        logger.error(f"No results.jsonl files found under {results_dir}")
+        sys.exit(1)
+
+    logger.info(f"Found {len(result_files)} (model, attack) result sets")
+
+    # Load the registry up front: attacker_from_attack_id() resolves a `pair__<config>`
+    # directory through it, and that happens before the first aggregate_costs() call
+    # would have loaded it.
+    load_model_registry(args.configs_dir)
+
+    cost_lookup: dict[tuple[str, str], dict[int, dict]] = {}
+    cat_cost_lookup: dict[tuple[str, str, str], dict[int, dict]] = {}
+
+    for (model_id, attack_id), path in sorted(result_files.items()):
+        key = (model_id, attack_id)
+        if key not in metrics_by_key:
+            logger.warning(f"  Skipping {model_id}/{attack_id}: not in metrics.csv")
+            continue
+
+        records: list[TrialRecord] = list(read_jsonl(path))
+        if not records:
+            logger.warning(f"  Empty file: {path}")
+            continue
+
+        # `pair__<config>` directories carry the attacker in their name (experiments with
+        # attacker_models); everything else is the single attacker named by --attacker-model.
+        attacker_id = attacker_from_attack_id(attack_id, default=args.attacker_model)
+
+        pressure_levels = sorted(metrics_by_key[key].keys())
+        costs = aggregate_costs(
+            records, pressure_levels,
+            judge_model_id=args.judge_model,
+            gcg_backward_mult=args.gcg_backward_mult,
+            configs_dir=args.configs_dir,
+            rl_num_generations=args.rl_num_generations,
+            rl_session_rounds=args.rl_session_rounds,
+            pricing_path=args.pricing_config,
+            attacker_model_id=attacker_id,
+        )
+
+        cost_lookup[key] = costs
+        max_lam = max(pressure_levels)
+        top = costs.get(max_lam, {})
+        logger.info(
+            f"  {model_id}/{attack_id}"
+            f"{'' if attacker_id == args.attacker_model else f' [attacker={attacker_id}]'}: "
+            f"target={top.get('mean_target_tokens', 0):.0f}tok  "
+            f"judge={top.get('mean_judge_tokens', 0):.0f}tok  "
+            f"total={top.get('mean_total_tokens', 0):.0f}tok  "
+            f"nojudge={top.get('mean_nojudge_tokens', 0):.0f}tok  "
+            f"TFLOPs={top.get('mean_total_tflops', 0):.4f}  "
+            f"(nojudge {top.get('mean_nojudge_tflops', 0):.4f})  (N={len(records)})"
+        )
+
+        # Per-category costs — reuse the already-loaded records
+        by_cat: dict[str, list[TrialRecord]] = defaultdict(list)
+        for rec in records:
+            by_cat[rec.category].append(rec)
+        for cat, cat_records in by_cat.items():
+            cat_costs = aggregate_costs(
+                cat_records, pressure_levels,
+                judge_model_id=args.judge_model,
+                gcg_backward_mult=args.gcg_backward_mult,
+                rl_num_generations=args.rl_num_generations,
+                rl_session_rounds=args.rl_session_rounds,
+                pricing_path=args.pricing_config,
+                attacker_model_id=attacker_id,
+            )
+            cat_cost_lookup[(model_id, attack_id, cat)] = cat_costs
+
+    # ------------------------------------------------------------------ #
+    # Join and write output CSV
+    # ------------------------------------------------------------------ #
+    out_fieldnames = list(metrics_fieldnames) + COST_COLS
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=out_fieldnames)
+        writer.writeheader()
+
+        for row in metrics_rows:
+            key = (row["model_id"], row["attack_id"])
+            lam = int(row["lambda"])
+            costs = cost_lookup.get(key, {}).get(lam, {})
+            out_row = dict(row)
+            for col in COST_COLS:
+                out_row[col] = costs.get(col, "")
+            writer.writerow(out_row)
+
+    print(f"\nCost metrics written to: {output_path}")
+    print(f"Columns added: {COST_COLS}")
+
+    cost_df = pd.read_csv(output_path)
+    summary_df = compute_cost_summary_metrics(cost_df)
+    summary_path = output_path.parent / "cost_summary_metrics.csv"
+    summary_df.to_csv(summary_path, index=False, na_rep="")
+    print(f"Cost summary metrics written to: {summary_path}")
+
+    # Same summary metrics (C@tau, AE, EE, ER, CAURC, R@N) on the judge-excluded FLOP axis.
+    # These are the numbers to quote when the claim is about what an ATTACKER spends, and the
+    # only ones that stay comparable across the judge ablation — C@tau on the judge-inclusive
+    # axis shifts when the judge changes size even if the attack is identical.
+    nojudge_summary_df = compute_cost_summary_metrics(
+        cost_df, compute_col="mean_nojudge_tflops"
+    )
+    nojudge_summary_path = output_path.parent / "cost_summary_metrics_nojudge.csv"
+    nojudge_summary_df.to_csv(nojudge_summary_path, index=False, na_rep="")
+    print(f"Cost summary metrics (no judge) written to: {nojudge_summary_path}")
+
+    # ------------------------------------------------------------------ #
+    # Per-category: join with metrics_by_category.csv and write outputs
+    # ------------------------------------------------------------------ #
+    cat_metrics_path = metrics_path.parent / "metrics_by_category.csv"
+    if not cat_metrics_path.exists():
+        logger.warning(f"metrics_by_category.csv not found at {cat_metrics_path}; skipping per-category cost output")
+    else:
+        with open(cat_metrics_path, newline="") as f:
+            reader = csv.DictReader(f)
+            cat_rows = list(reader)
+            cat_fieldnames = reader.fieldnames or []
+
+        cat_out_fieldnames = list(cat_fieldnames) + COST_COLS
+        cat_output_path = output_path.parent / "cost_metrics_by_category.csv"
+
+        with open(cat_output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=cat_out_fieldnames)
+            writer.writeheader()
+            for row in cat_rows:
+                key = (row["model_id"], row["attack_id"], row["category"])
+                lam = int(row["lambda"])
+                costs = cat_cost_lookup.get(key, {}).get(lam, {})
+                out_row = dict(row)
+                for col in COST_COLS:
+                    out_row[col] = costs.get(col, "")
+                writer.writerow(out_row)
+
+        print(f"Per-category cost metrics written to: {cat_output_path}")
+
+        cat_cost_df = pd.read_csv(cat_output_path)
+        cat_summary_df = compute_cost_summary_by_category(cat_cost_df)
+        cat_summary_path = output_path.parent / "cost_summary_by_category.csv"
+        cat_summary_df.to_csv(cat_summary_path, index=False, na_rep="")
+        print(f"Per-category cost summary written to: {cat_summary_path}")
+
+        cat_nojudge_df = compute_cost_summary_by_category(
+            cat_cost_df, compute_col="mean_nojudge_tflops"
+        )
+        cat_nojudge_path = output_path.parent / "cost_summary_by_category_nojudge.csv"
+        cat_nojudge_df.to_csv(cat_nojudge_path, index=False, na_rep="")
+        print(f"Per-category cost summary (no judge) written to: {cat_nojudge_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,21 @@
+# Paper §4 — Training Stage Study (Table 1, Figure 1 left)
+# Tulu3 8B family: Base → SFT → DPO → RLVR on HarmBench
+name: "paper_training_stage"
+benchmark: "harmbench"
+n_prompts: 200
+pressure_levels: [0, 1, 2, 4, 6, 8, 10]
+lambda_max: 10
+models:
+  - "tulu3_8b_base"
+  - "tulu3_8b_sft"
+  - "tulu3_8b_dpo"
+  - "tulu3_8b_rlvr"
+attacks:
+  - "pair"
+  - "jailbroken"
+  - "gcg"
+  - "rl"          # per-prompt GRPO adaptive attack (expensive; see configs/attacks/rl.yaml + run_rl_experiments.sh)
+judge_model: "llama3.1_8b_instruct_judge"
+seeds: [1997, 2, 100, 42, 5431, 2002, 256, 512, 123, 5]
+tau: 0.5
+n_bootstrap: 1000
